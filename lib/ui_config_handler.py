@@ -28,6 +28,7 @@ import tornado.web
 from collections import OrderedDict
 
 from lib.zynthian_config_handler import ZynthianConfigHandler
+from lib import ui_looks
 
 # ------------------------------------------------------------------------------
 # UI Configuration
@@ -41,11 +42,20 @@ class UiConfigHandler(ZynthianConfigHandler):
         "Helvetica",
         "Economica",
         "Orbitron",
-        "Abel"
+        "Abel",
+        "Inter"
     ]
+
+    @staticmethod
+    def current_look(looks):
+        """The seventeen look settings as the UI reads them: the environment, else zynthian-ui's own default
+        (the stock look)."""
+        stock = looks.get('stock', {}).get('values', {})
+        return {k: os.environ.get(k, stock.get(k)) for k in ui_looks.LOOK_KEYS}
 
     @tornado.web.authenticated
     def get(self, errors=None):
+        looks = ui_looks.read_looks()
         touch_navigation = os.environ.get('ZYNTHIAN_UI_TOUCH_NAVIGATION', "")
         if touch_navigation not in ("", "v5_keypad_left", "v5_keypad_right"):
             touch_navigation = "v5_keypad_left"
@@ -152,6 +162,7 @@ class UiConfigHandler(ZynthianConfigHandler):
                 'type': 'html',
                 'content': "<h3>Font & Colors</h3>",
             },
+            ui_looks.PRESET_FIELD: ui_looks.preset_field(looks, self.current_look(looks)),
             'ZYNTHIAN_UI_FONT_SIZE': {
                 'type': 'text',
                 'title': 'Font size',
@@ -276,6 +287,10 @@ class UiConfigHandler(ZynthianConfigHandler):
         self.request.arguments['ZYNTHIAN_VNCSERVER_ENABLED'] = self.request.arguments.get(
             'ZYNTHIAN_VNCSERVER_ENABLED', '0')
         escaped_arguments = tornado.escape.recursive_unicode(self.request.arguments)
+        looks = ui_looks.read_looks()
+        chosen = escaped_arguments.get(ui_looks.PRESET_FIELD, [''])
+        chosen = chosen[0] if isinstance(chosen, list) else chosen
+        ui_looks.apply_preset(looks, chosen, self.current_look(looks), escaped_arguments)
         errors = self.update_config(escaped_arguments)
         self.restart_ui_flag = True
         self.get(errors)

@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [openmixer]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    name: unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: The UI page's colour preset
+        run: python3 -m unittest discover -s tests -v
