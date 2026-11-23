@@ -51,15 +51,29 @@ class ExtraPacksHandler(ZynthianBasicHandler):
     collections_dir = data_dir + "/collections"
 
     package_info_cache_fpath = "/tmp/package_info.yml"
-
     download_url_base = "https://os.zynthian.org/packages"
+
+    pack_info = {}
 
     def prepare(self):
         super().prepare()
-        #force_reload = (self.request.headers.get("Cache-Control") == "no-cache")
-        #logging.debug(f"FORCE PACKAGE INFO RELOAD => {force_reload}")
-        #if force_reload or not self.get_cache_packages():
-        self.get_packages()
+        force_reload = (self.request.headers.get("Cache-Control") == "no-cache")
+        logging.debug(f"FORCE PACKAGE INFO RELOAD => {force_reload}")
+        if force_reload and self.request.method == "GET" and self.current_user:
+            # Forced page reload (Ctrl+F5, Ctrl+Shift+R...) by a logged-in user: get the latest package catalog first
+            self.update_packages_repo()
+        if force_reload or not self.get_cache_packages():
+            self.get_packages()
+
+    def update_packages_repo(self):
+        """Update the package catalog (git pull in zynthian-packages). On failure (offline...) keep the local copy."""
+        try:
+            res = check_output(["git", "-C", self.packages_dir, "pull", "--ff-only"], stderr=STDOUT,
+                               encoding="utf-8", timeout=30, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+            logging.info(f"Package catalog updated => {res.strip()}")
+        except Exception as e:
+            output = getattr(e, "output", None)
+            logging.warning(f"Can't update the package catalog in '{self.packages_dir}' => {output.strip() if output else e}")
 
     @tornado.web.authenticated
     def get(self, errors=None):
@@ -132,7 +146,7 @@ class ExtraPacksHandler(ZynthianBasicHandler):
                 if os.path.isdir(f"{self.collections_dir}/{pack_name}"):
                     info["installed"] = True
                     info["update"] = False
-                    #self.save_cache_packages()
+                    self.save_cache_packages()
                 else:
                     raise Exception(f"Failed to download/unpack from '{info['pack_url']}'!")
                 # Overwrite package info with fresh info from packages repository
@@ -152,7 +166,7 @@ class ExtraPacksHandler(ZynthianBasicHandler):
                 if getoutput(f"bash \"{pack_script}\" installed").split("\n")[0] == "installed":
                     info["installed"] = True
                     info["update"] = False
-                    #self.save_cache_packages()
+                    self.save_cache_packages()
                 else:
                     raise Exception(f"Install script failed!")
 
@@ -185,7 +199,7 @@ class ExtraPacksHandler(ZynthianBasicHandler):
                     raise Exception(f"Can't uninstall package!")
                 else:
                     info["installed"] = False
-                    #self.save_cache_packages()
+                    self.save_cache_packages()
 
             self.remove_from_installed_packages(info['cat'], pack_name)
             self.restart_ui_flag = info['restart_ui']
@@ -207,8 +221,16 @@ class ExtraPacksHandler(ZynthianBasicHandler):
         return False
 
     def save_cache_packages(self):
+        # Update cache when calling from the zynpack tool:
+        if len(self.pack_info) == 1:
+            one_pack_info = self.pack_info
+            self.get_cache_packages()
+            for cat in one_pack_info:
+                for pack in one_pack_info[cat]:
+                    # The cache may not have this category yet (e.g. written by a previous zynpack call)
+                    self.pack_info.setdefault(cat, {})[pack] = one_pack_info[cat][pack]
         with open(self.package_info_cache_fpath, "w") as f:
-             yaml.dump(self.pack_info, f)
+            yaml.dump(self.pack_info, f)
 
     def check_update(self, info):
         installed_info_fpath = f"{self.installed_packages_dir}/{info['cat']}/{info['name']}/info.yml"
@@ -283,131 +305,137 @@ class ExtraPacksHandler(ZynthianBasicHandler):
                         pack_dict[p['name']] = p
                     self.pack_info[item.name] = pack_dict
         # Save package info cache
-        #self.save_cache_packages()
+        self.save_cache_packages()
+        return self.pack_info
 
     def get_packages_from_cat(self, dpath):
         pack_info = {}
-
         for pack_dpath in dpath.iterdir():
             if not pack_dpath.is_dir():
-                continue
-
+                return None
             cat_name = dpath.name
             pack_name = pack_dpath.name
-
             # Ignore duplicates
             if pack_name in self.pack_info:
                 continue
-
-            # Get info from yaml file
-            info_yml_fpath = f"{pack_dpath}/info.yml"
-            try:
-                with open(info_yml_fpath, "r", encoding="utf-8") as fd:
-                    yml_info = yaml.safe_load(fd)
-            except FileNotFoundError:
-                logging.error(f"Can't find YAML file '{info_yml_fpath}'.")
-            except yaml.YAMLError as exc:
-                logging.error(f"Can't parse YAML file '{info_yml_fpath}' => {exc}")
-
-            pack_base_url = f"{self.download_url_base}/{cat_name}/{pack_name}"
-
-            # Check installed packages dir
-            if os.path.isdir(self.installed_packages_dir):
-                if os.path.isdir(f"{self.installed_packages_dir}/{cat_name}/{pack_name}"):
-                    installed = True
-                else:
-                    installed = False
-            else:
-                installed = None
-
-            # Check for a package script ...
-            pack_script = Path(f"{pack_dpath}/{pack_name}.sh")
-            if pack_script.is_file():
-                if "size" in yml_info:
-                    pack_size_text =  yml_info["size"]
-                else:
-                    pack_size_text =  "unknown"
-                if installed is None:
-                    # Check if it's installed by running the package script
-                    installed = (getoutput(f"bash \"{pack_script}\" installed").split("\n")[0] == "installed")
-                pack_url = None
-            else:
-                # No package script
-                pack_script = None
-                pack_url = f"{pack_base_url}.tar.xz"
-
-                # Get size from info file
-                if "size" in yml_info:
-                    pack_size_text =  yml_info["size"]
-                # Else check existance of package file => Get package size
-                else:
-                    try:
-                        res = requests.head(pack_url)
-                    except Exception as e:
-                        logging.error(e)
-                    if res.status_code == 200:
-                        # Get size by querying package tar.xz file
-                        pack_size = int(res.headers["content-length"])
-                        if pack_size < 1000:
-                            logging.error(f"Package file for '{pack_name}' is too small ({pack_size}).")
-                            continue
-                        pack_size = pack_size/(1000000)
-                        if pack_size < 1000:
-                            pack_size_text = f"{round(pack_size)}MB"
-                        else:
-                            pack_size_text = f"{pack_size/1000:.1f}GB"
-                if installed is None:
-                    # Check if it's installed by looking for the collection dir
-                    installed = os.path.isdir(f"{self.collections_dir}/{pack_name}")
-
-            info = {
-                "cat": cat_name,
-                "name": pack_name,
-                "title": pack_name,
-                "author": "unknown",
-                "license": "unknown",
-                "image": "",
-                "description": "",
-                "description_extended": "",
-                "content": "miscelanea",
-                "size": pack_size_text,
-                "source_url": "",
-                "pack_dpath": str(pack_dpath),
-                "pack_url": pack_url,
-                "pack_script": str(pack_script),
-                "restart_ui": False,
-                "installed": installed,
-            }
-            # Complete package info
-            if "title" in yml_info:
-                info["title"] = yml_info["title"]
-            if "author" in yml_info:
-                info["author"] = yml_info["author"]
-            if "license" in yml_info:
-                info["license"] = yml_info["license"]
-            if "description" in yml_info:
-                parts = yml_info["description"].split("\n", 1)
-                info["description"] = parts[0]
-                if len(parts) > 1 and parts[1].strip():
-                    ext_desc = parts[1].replace("\n", "</p><p>")
-                    info["description_extended"] = f"<p>{ext_desc}</p>"
-            if "source_url" in yml_info:
-                info["source_url"] = yml_info["source_url"]
-            if "icon" in yml_info:
-                info["image"] = f"package_files/{cat_name}/{pack_name}/{yml_info['icon']}"
-            if "content" in yml_info:
-                info["content"] = yml_info['content']
-            if "restart_ui" in yml_info:
-                info["restart_ui"] = yml_info['restart_ui']
-            if "version" in yml_info:
-                info["version"] = yml_info['version']
-            if installed:
-                info["update"] = self.check_update(info)
-            else:
-                info["update"] = False
-            # Add to the list
-            pack_info[pack_name] = info
-
+            info = self.get_package(cat_name, pack_name)
+            if info:
+                # Add to the list
+                pack_info[pack_name] = info
         return pack_info
+
+    def get_package(self, cat_name, pack_name):
+        pack_dpath = Path(f"{self.packages_dir}/{cat_name}/{pack_name}")
+        if not pack_dpath.is_dir():
+            logging.error(f"Package dir not found at'{pack_dpath}'")
+            return None
+
+        # Get info from yaml file
+        info_yml_fpath = f"{pack_dpath}/info.yml"
+        try:
+            with open(info_yml_fpath, "r", encoding="utf-8") as fd:
+                yml_info = yaml.safe_load(fd)
+        except FileNotFoundError:
+            logging.error(f"Can't find YAML file '{info_yml_fpath}'.")
+        except yaml.YAMLError as exc:
+            logging.error(f"Can't parse YAML file '{info_yml_fpath}' => {exc}")
+
+        pack_base_url = f"{self.download_url_base}/{cat_name}/{pack_name}"
+
+        # Check installed packages dir
+        if os.path.isdir(self.installed_packages_dir):
+            if os.path.isdir(f"{self.installed_packages_dir}/{cat_name}/{pack_name}"):
+                installed = True
+            else:
+                installed = False
+        else:
+            installed = None
+
+        # Check for a package script ...
+        pack_script = Path(f"{pack_dpath}/{pack_name}.sh")
+        if pack_script.is_file():
+            if "size" in yml_info:
+                pack_size_text =  yml_info["size"]
+            else:
+                pack_size_text =  "unknown"
+            if installed is None:
+                # Check if it's installed by running the package script
+                installed = (getoutput(f"bash \"{pack_script}\" installed").split("\n")[0] == "installed")
+            pack_url = None
+        else:
+            # No package script
+            pack_script = None
+            pack_url = f"{pack_base_url}.tar.xz"
+
+            # Get size from info file
+            if "size" in yml_info:
+                pack_size_text =  yml_info["size"]
+            # Else check existance of package file => Get package size
+            else:
+                try:
+                    res = requests.head(pack_url)
+                except Exception as e:
+                    logging.error(e)
+                if res.status_code == 200:
+                    # Get size by querying package tar.xz file
+                    pack_size = int(res.headers["content-length"])
+                    if pack_size < 1000:
+                        logging.error(f"Package file for '{pack_name}' is too small ({pack_size}).")
+                        return None
+                    pack_size = pack_size/(1000000)
+                    if pack_size < 1000:
+                        pack_size_text = f"{round(pack_size)}MB"
+                    else:
+                        pack_size_text = f"{pack_size/1000:.1f}GB"
+            if installed is None:
+                # Check if it's installed by looking for the collection dir
+                installed = os.path.isdir(f"{self.collections_dir}/{pack_name}")
+
+        info = {
+            "cat": cat_name,
+            "name": pack_name,
+            "title": pack_name,
+            "author": "unknown",
+            "license": "unknown",
+            "image": "",
+            "description": "",
+            "description_extended": "",
+            "content": "miscelanea",
+            "size": pack_size_text,
+            "source_url": "",
+            "pack_dpath": str(pack_dpath),
+            "pack_url": pack_url,
+            "pack_script": str(pack_script),
+            "restart_ui": False,
+            "installed": installed,
+        }
+        # Complete package info
+        if "title" in yml_info:
+            info["title"] = yml_info["title"]
+        if "author" in yml_info:
+            info["author"] = yml_info["author"]
+        if "license" in yml_info:
+            info["license"] = yml_info["license"]
+        if "description" in yml_info:
+            parts = yml_info["description"].split("\n", 1)
+            info["description"] = parts[0]
+            if len(parts) > 1 and parts[1].strip():
+                ext_desc = parts[1].replace("\n", "</p><p>")
+                info["description_extended"] = f"<p>{ext_desc}</p>"
+        if "source_url" in yml_info:
+            info["source_url"] = yml_info["source_url"]
+        if "icon" in yml_info:
+            info["image"] = f"package_files/{cat_name}/{pack_name}/{yml_info['icon']}"
+        if "content" in yml_info:
+            info["content"] = yml_info['content']
+        if "restart_ui" in yml_info:
+            info["restart_ui"] = yml_info['restart_ui']
+        if "version" in yml_info:
+            info["version"] = yml_info['version']
+        if installed:
+            info["update"] = self.check_update(info)
+        else:
+            info["update"] = False
+        return info
 
 # *****************************************************************************

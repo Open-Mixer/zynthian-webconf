@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Zynthian Remote</title>
+
+<link rel="stylesheet" href="css/zynthian-mockup.css" />
+<link rel="stylesheet" href="css/audiowide.css" />
+<link rel="stylesheet" href="css/font-awesome-all-min.css" />
+
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+    }
+    body {
+        background-color: #000;
+        overflow: hidden;
+    }
+    .audio-wrapper {
+        float: right;
+    }
+    /* Own audio controls (mute, volume, state) for the stream player in the iframe, whose native
+       video controls (with a useless time line) are disabled. The iframe stays, invisible. */
+    .audio-wrapper.custom .audio-frame { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    #audio-ctl {
+        display: none;
+        position: fixed; top: 8px; right: 8px; z-index: 60;
+        align-items: center; gap: 8px;
+        padding: 4px 12px 4px 6px;
+        border-radius: 16px;
+        background: rgba(20, 23, 29, .82);
+        color: #e8eaee;
+        font: 13px/1.4 system-ui, sans-serif;
+        user-select: none; -webkit-user-select: none;
+    }
+    .audio-wrapper.custom #audio-ctl { display: flex; }
+    #audio-mute {
+        width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%;
+        background: transparent; color: #e8eaee; cursor: pointer; font-size: 15px;
+    }
+    #audio-mute:hover { background: rgba(255, 255, 255, .12); }
+    #audio-vol { width: 90px; accent-color: #e8eaee; cursor: pointer; }
+    #audio-state { width: 8px; height: 8px; border-radius: 50%; background: #7a828f; flex: none; }
+    #audio-state.playing { background: #3fd072; }
+    #audio-state.error { background: #e5432d; }
+    /* Style the audio iframe to look like a small control widget */
+    .audio-frame {
+        width: 340px;
+        height: 45px;
+        border: none;
+        overflow: hidden;
+        background: transparent;
+        overflow: hidden;
+    }
+    /* Responsive, Proportionate VNC Frame Wrapper */
+    .vnc-frame {
+        width: 100%;
+        height: 100%;
+
+        /* Set this to match Zynthian resolution */
+        /*max-width: 800px;
+        max-height: 480px;*/
+
+        border: 0px;
+        background-color: #000;
+        overflow: hidden;
+    }
+
+    div.zynthian_mockup_container {
+        display: block;
+    }
+
+    svg.v5_mockup {
+        display: block;
+    }
+
+    svg.v5_mockup svg#push-buttons image {
+        cursor: pointer;
+    }
+
+    svg.v5_mockup svg#push-knobs circle {
+        cursor: pointer;
+        opacity: 0.01;
+        r: 40px;
+        fill: #808080;
+    }
+    svg.v5_mockup svg#push-knobs circle:hover {
+        cursor: pointer;
+        opacity: 0.1;
+        fill: #c0c000;
+    }
+
+    /* Piano keyboard (expand/collapse) */
+    #piano-panel {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 100;
+        font-family: sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+    }
+    #piano-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 28px;
+        padding: 0 10px;
+        background: #202020;
+        color: #ccc;
+        font-size: 13px;
+        border-top: 1px solid #444;
+    }
+    /* The mockup fills the space above the piano bar (and the keyboard, when shown), always centered.
+       --piano-bar-h is the bar's real height (it wraps into several rows on small screens). */
+    /* --top-h keeps a strip free at the top for the menu and the audio controls: the mockup never goes under them */
+    :root { --top-h: 46px; }
+    svg.v5_mockup {
+        width: 100%;
+        margin-top: var(--top-h);
+        height: calc(100vh - var(--top-h) - var(--piano-bar-h, 29px));
+        height: calc(100dvh - var(--top-h) - var(--piano-bar-h, 29px));
+    }
+    body.piano-open svg.v5_mockup {
+        height: calc(100vh - var(--top-h) - var(--piano-bar-h, 29px) - var(--piano-keys-h, 140px));
+        height: calc(100dvh - var(--top-h) - var(--piano-bar-h, 29px) - var(--piano-keys-h, 140px));
+    }
+    /* Small screens: the bar's controls wrap into rows, the keyboard hints (computer keys) are hidden */
+    @media (max-width: 720px), (max-height: 480px) {
+        #piano-bar { height: auto; min-height: 28px; flex-wrap: wrap; row-gap: 6px; column-gap: 12px; padding: 5px 8px; }
+        #piano-bar .piano-hint { display: none !important; }
+        #piano-bar #piano-vel { width: 90px; }
+        #piano-bar .spacer { display: none; }
+        /* First row: piano toggle + End session; second row: octave and velocity */
+        #piano-bar .demo-badge { margin-left: auto; order: 1; }
+    }
+    @media (max-height: 480px) { :root { --piano-keys-h: 100px; } }
+    @media (max-width: 720px) {
+        #piano-panel.open #piano-bar .row-break { display: block; order: 2; flex-basis: 100%; height: 0; }
+        #piano-bar .piano-ctrl { order: 3; }
+    }
+    #piano-bar button {
+        background: #333;
+        color: #ddd;
+        border: 1px solid #555;
+        border-radius: 3px;
+        cursor: pointer;
+        padding: 1px 8px;
+    }
+    #piano-bar button:hover { background: #444; }
+    #piano-bar .piano-ctrl { display: none; align-items: center; gap: 6px; }
+    #piano-panel.open #piano-bar .piano-ctrl { display: flex; }
+    #piano-bar .spacer { flex: 1; }
+    #piano-bar .row-break { display: none; }
+    #topbar #midi-btn.on { background: #1f6b3a; }
+    #topbar #midi-btn.on.flash { background: #3fd072; }
+    #topbar #midi-btn:disabled { opacity: .45; cursor: default; }
+    #midi-menu {
+        display: none;
+        position: absolute;
+        left: 0; top: 100%;
+        margin-top: 6px;
+        min-width: 230px;
+        padding: 8px 10px;
+        background: rgba(20, 23, 29, .95);
+        color: #ddd;
+        border-radius: 10px;
+        font-size: 13px;
+        user-select: none;
+    }
+    #midi-menu.open { display: block; }
+    #piano-bar #demo-end {
+        background: #e5432d;
+        border: 1px solid #ff8a76;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 2px 16px;
+        border-radius: 4px;
+    }
+    #piano-bar #demo-end:hover { background: #ff5a42; }
+    #midi-menu label { display: flex; gap: 8px; align-items: center; padding: 2px 0; cursor: pointer; }
+    #midi-menu .muted { color: #999; font-size: 12px; }
+    #piano-keys {
+        display: none;
+        position: relative;
+        height: var(--piano-keys-h, 140px);
+        background: #111;
+    }
+    #piano-panel.open #piano-keys { display: flex; }
+    #piano-keys:focus { outline: none; }
+    .pkey-white {
+        flex: 1;
+        position: relative;
+        background: #f4f4f4;
+        border: 1px solid #333;
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        box-sizing: border-box;
+    }
+    .pkey-white.active { background: #00e0e0; }
+    .pkey-white span {
+        position: absolute; bottom: 3px; left: 0; right: 0;
+        text-align: center; font-size: 11px; color: #666; pointer-events: none;
+    }
+    .pkey-black {
+        position: absolute;
+        top: 0; height: 60%;
+        width: 0; /* positioned by JS */
+        background: #111;
+        border: 1px solid #000;
+        border-radius: 0 0 3px 3px;
+        box-sizing: border-box;
+        z-index: 2;
+    }
+    .pkey-black.active { background: #008c8c; }
+    #topbar {
+        position: fixed;
+        top: 8px; left: 8px;
+        z-index: 60;
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        font: 13px/1.4 system-ui, sans-serif;
+        color: #e8eaee;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    #topbar .pill, #keys-legend summary {
+        display: block;
+        padding: 5px 11px;
+        border: 0;
+        border-radius: 14px;
+        background: rgba(20, 23, 29, .82);
+        color: #e8eaee;
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    #topbar .pill:hover, #keys-legend summary:hover { background: rgba(20, 23, 29, .95); }
+    #topbar .pill.disabled { opacity: .45; cursor: default; }
+    #topbar-items { display: flex; gap: 8px; align-items: flex-start; }
+    #topbar-toggle { display: none !important; }
+    /* Small screens (phones): the menu collapses behind a single button and opens as a column */
+    @media (max-width: 720px), (max-height: 480px) {
+        #topbar { flex-direction: column; }
+        :root { --top-h: 58px; }
+        #topbar-toggle {
+            display: flex !important; align-items: center; justify-content: center;
+            width: 42px; height: 42px; padding: 0; cursor: pointer;
+            border: 2px solid rgba(232, 234, 238, .85); border-radius: 8px;
+            background: rgba(20, 23, 29, .82);
+        }
+        #topbar-toggle svg { fill: #f4f5f7; }
+        #topbar.open #topbar-toggle { background: rgba(60, 66, 78, .95); }
+        /* Smaller audio player */
+        .audio-frame { transform: scale(.6); transform-origin: top right; }
+        #audio-vol { width: 70px; }
+        #topbar-items { display: none; flex-direction: column; }
+        #topbar.open #topbar-items { display: flex; }
+        #topbar #topbar-items #midi-menu, #topbar #topbar-items .legend-body { position: static; }
+    }
+    #keys-legend, #midi-wrap { position: relative; }
+    #keys-legend summary { list-style: none; width: fit-content; }
+    #keys-legend summary::-webkit-details-marker { display: none; }
+    #keys-legend .legend-body {
+        position: absolute; top: 100%; left: 0;
+        margin-top: 6px;
+        padding: 10px 14px 12px;
+        width: 340px;
+        max-width: calc(100vw - 16px);
+        border-radius: 10px;
+        background: rgba(20, 23, 29, .92);
+    }
+    #keys-legend h4 { margin: 8px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #9aa3b2; }
+    #keys-legend h4:first-child { margin-top: 0; }
+    #keys-legend .row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+    #keys-legend kbd {
+        font: 12px ui-monospace, monospace;
+        background: #2c3340;
+        border-radius: 4px;
+        padding: 0 5px;
+        white-space: nowrap;
+    }
+    #keys-legend .note { margin: 8px 0 0; font-size: 12px; color: #9aa3b2; }
+
+    /* noVNC viewer, positioned over the mockup's screen (foreignObject) in page coordinates, so
+       noVNC does the scaling itself and maps the pointer correctly */
+    #novnc-screen {
+        position: absolute;
+        background: #000;
+        overflow: hidden;
+        z-index: 5;
+    }
+    #novnc-screen[hidden] { display: none; }
+    /* The device hides its pointer (blank X cursor) and noVNC copies it as an inline style on its
+       canvas: show a normal arrow in the browser only. The device's display is not affected. */
+    #novnc-screen canvas { cursor: pointer !important; }
+    #novnc-status, #novnc-auth {
+        position: absolute;
+        left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 2;
+        color: #cfd6e2;
+        font: 14px sans-serif;
+        text-align: center;
+        max-width: 90%;
+    }
+    #novnc-status a { color: #7fb2ff; }
+    #novnc-auth { display: flex; flex-direction: column; gap: 8px; background: #1b1f27;
+        padding: 16px 20px; border-radius: 8px; border: 1px solid #3a4150; }
+    #novnc-auth[hidden] { display: none; }
+    #novnc-auth input { font-size: 15px; padding: 6px 8px; border-radius: 4px; border: 1px solid #4a5263;
+        background: #0f1217; color: #e8ecf2; }
+    #novnc-auth button { font-size: 14px; padding: 6px; border-radius: 4px; border: 0; background: #2f6fdb;
+        color: #fff; cursor: pointer; }
+</style>
+</head>
+
+<body>
+    <div class="audio-wrapper">
+        <iframe
+            class="audio-frame"
+            id="audioStreamNode"
+            allow="autoplay">
+        </iframe>
+        <div id="audio-ctl">
+            <button id="audio-mute" title="Mute / unmute"><i class="fa fa-volume-up"></i></button>
+            <input type="range" id="audio-vol" min="0" max="100" value="100" title="Volume">
+            <span id="audio-state" title="Audio stream"></span>
+        </div>
+    </div>
+
+    <!-- noVNC viewer (real device): placed over the mockup's screen area by novncPlace() -->
+    <div id="novnc-screen" hidden>
+        <div id="novnc-status"></div>
+        <form id="novnc-auth" hidden>
+            <label for="novnc-password">VNC password</label>
+            <input type="password" id="novnc-password" autocomplete="current-password">
+            <button type="submit">Connect</button>
+        </form>
+    </div>
+
+    <div id="zynthian_mockup_container" class="zynthian_mockup_container">
+
+    <svg id="v5_mockup" class="v5_mockup" viewBox="0 0 1920 1000" >
+        <svg id="leds" x="133" y="208">
+            <circle id="led-11" cx="50" cy="50" fill="#505050" />
+            <circle id="led-12" cx="172" cy="50" fill="#505050" />
+            <circle id="led-13" cx="294" cy="50" fill="#505050" />
+            <circle id="led-14" cx="416" cy="50" fill="#505050" />
+
+            <circle id="led-21" cx="50" cy="165" fill="#505050" />
+            <circle id="led-22" cx="172" cy="165" fill="#505050" />
+            <circle id="led-23" cx="294" cy="165" fill="#505050" />
+            <circle id="led-24" cx="416" cy="165" fill="#505050" />
+
+            <circle id="led-31" cx="50" cy="275" fill="#505050" />
+            <circle id="led-32" cx="172" cy="275" fill="#505050" />
+            <circle id="led-33" cx="294" cy="275" fill="#505050" />
+            <circle id="led-34" cx="416" cy="275" fill="#505050" />
+
+            <circle id="led-41" cx="50" cy="390" fill="#505050" />
+            <circle id="led-42" cx="172" cy="390" fill="#505050" />
+            <circle id="led-43" cx="294" cy="390" fill="#505050" />
+            <circle id="led-44" cx="416" cy="390" fill="#505050" />
+
+            <circle id="led-51" cx="50" cy="505" fill="#505050" />
+            <circle id="led-52" cx="172" cy="505" fill="#505050" />
+            <circle id="led-53" cx="294" cy="505" fill="#505050" />
+            <circle id="led-54" cx="416" cy="505" fill="#505050" />
+        </svg>
+
+        <image id="v5_render" href="v5_render_zenital_mockup_1910.png" x="0" y="0" />
+        <!-- Embedded Native KasmVNC Visual Interface -->
+        <foreignObject x="731" y="254" width="800" height="480">
+            <iframe
+                class="vnc-frame"
+                id="vncVisualNode"
+                scrolling="no"
+                allow="clipboard-read; clipboard-write">
+            </iframe>
+
+        </foreignObject>
+
+        <svg id="push-buttons" x="68" y="155">
+            <image id="but-11" href="button_push.png" x="50" y="50" data-id="0" />
+            <image id="but-12" href="button_push.png" x="172" y="50" data-id="1" />
+            <image id="but-13" href="button_push.png" x="294" y="50" data-id="2" />
+            <image id="but-14" href="button_push.png" x="416" y="50" data-id="3" />
+
+            <image id="but-21" href="button_push.png" x="50" y="165" data-id="4" />
+            <image id="but-22" href="button_push.png" x="172" y="165" data-id="5" />
+            <image id="but-23" href="button_push.png" x="294" y="165" data-id="6" />
+            <image id="but-24" href="button_push.png" x="416" y="165" data-id="7" />
+
+            <image id="but-31" href="button_push.png" x="50" y="275" data-id="8" />
+            <image id="but-32" href="button_push.png" x="172" y="275" data-id="9" />
+            <image id="but-33" href="button_push.png" x="294" y="275" data-id="10" />
+            <image id="but-34" href="button_push.png" x="416" y="275" data-id="11" />
+
+            <image id="but-41" href="button_push.png" x="50" y="390" data-id="12" />
+            <image id="but-42" href="button_push.png" x="172" y="390" data-id="13" />
+            <image id="but-43" href="button_push.png" x="294" y="390" data-id="14" />
+            <image id="but-44" href="button_push.png" x="416" y="390" data-id="15" />
+
+            <image id="but-51" href="button_push.png" x="50" y="505" data-id="16" />
+            <image id="but-52" href="button_push.png" x="172" y="505" data-id="17" />
+            <image id="but-53" href="button_push.png" x="294" y="505" data-id="18" />
+            <image id="but-54" href="button_push.png" x="416" y="505" data-id="19" />
+        </svg>
+
+        <svg id="push-buttons-outline" x="79" y="154">
+            <rect id="bout-11" x="50" y="50" data-id="0" />
+            <rect id="bout-12" x="172" y="50" data-id="1" />
+            <rect id="bout-13" x="294" y="50" data-id="2" />
+            <rect id="bout-14" x="416" y="50" data-id="3" />
+
+            <rect id="bout-21" x="50" y="165"  data-id="4" />
+            <rect id="bout-22" x="172" y="165" data-id="5" />
+            <rect id="bout-23" x="294" y="165" data-id="6" />
+            <rect id="bout-24" x="416" y="165" data-id="7" />
+
+            <rect id="bout-31" x="50" y="275" data-id="8" />
+            <rect id="bout-32" x="172" y="275" data-id="9" />
+            <rect id="bout-33" x="294" y="275" data-id="10" />
+            <rect id="bout-34" x="416" y="275" data-id="11" />
+
+            <rect id="bout-41" x="50" y="390" data-id="12" />
+            <rect id="bout-42" x="172" y="390" data-id="13" />
+            <rect id="bout-43" x="294" y="390" data-id="14" />
+            <rect id="bout-44" x="416" y="390" data-id="15" />
+
+            <rect id="bout-51" x="50" y="505" data-id="16" />
+            <rect id="bout-52" x="172" y="505" data-id="17" />
+            <rect id="bout-53" x="294" y="505" data-id="18" />
+            <rect id="bout-54" x="416" y="505" data-id="19" />
+        </svg>
+
+        <svg id="push-knobs-outline" x="1658" y="125">
+            <circle id="knout-1" cx="60" cy="60" data-id="20" />
+            <circle id="knout-2" cx="60" cy="260" data-id="21" />
+            <circle id="knout-3" cx="60" cy="455" data-id="22" />
+            <circle id="knout-4" cx="60" cy="670" data-id="23" />
+        </svg>
+
+        <svg id="rotate-knobs-arrow" x="1594" y="60">
+            <image id="rknob-1" href="arrow-rotation-r.png" x="73" y="50" />
+            <image id="lknob-1" href="arrow-rotation-l.png" x="50" y="50" />
+            <image id="rknob-2" href="arrow-rotation-r.png" x="73" y="250" />
+            <image id="lknob-2" href="arrow-rotation-l.png" x="50" y="250" />
+            <image id="rknob-3" href="arrow-rotation-r.png" x="73" y="445" />
+            <image id="lknob-3" href="arrow-rotation-l.png" x="50" y="445" />
+            <image id="rknob-4" href="arrow-rotation-r.png" x="73" y="660" />
+            <image id="lknob-4" href="arrow-rotation-l.png" x="50" y="660" />
+        </svg>
+
+        <svg id="push-knobs" x="1658" y="125">
+            <circle id="knob-1" cx="60" cy="60" data-id="20" pointer-events="all" />
+            <circle id="knob-2" cx="60" cy="260" data-id="21" pointer-events="all" />
+            <circle id="knob-3" cx="60" cy="455" data-id="22" pointer-events="all" />
+            <circle id="knob-4" cx="60" cy="670" data-id="23" pointer-events="all" />
+        </svg>
+
+    </svg>
+    </div>
+
+
+    <div id="topbar">
+    <button id="topbar-toggle" title="Menu" aria-label="Menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="3" y="5" width="18" height="2.4" rx="1.2"/><rect x="3" y="10.8" width="18" height="2.4" rx="1.2"/><rect x="3" y="16.6" width="18" height="2.4" rx="1.2"/></svg></button>
+    <div id="topbar-items">
+    <details id="keys-legend">
+        <summary>&#9000; Keyboard tips</summary>
+        <div class="legend-body">
+            <h4>Zynthian controls</h4>
+            <div class="row"><span>Select / Back</span><span><kbd>Enter</kbd> <kbd>Esc</kbd></span></div>
+            <div class="row"><span>Navigate the screen</span><span><kbd>Ctrl</kbd>+<kbd>&larr;&uarr;&darr;&rarr;</kbd></span></div>
+            <div class="row"><span>Switches 1&ndash;4</span><span><kbd>Ctrl</kbd>+<kbd>I</kbd> <kbd>K</kbd> <kbd>O</kbd> <kbd>L</kbd></span></div>
+            <div class="row"><span>Select knob (turn)</span><span><kbd>Ctrl</kbd>+<kbd>,</kbd> <kbd>.</kbd></span></div>
+            <div class="row"><span>Program change 0&ndash;9</span><span><kbd>Ctrl</kbd>+<kbd>0&hellip;9</kbd></span></div>
+            <h4>Piano keyboard</h4>
+            <div class="row"><span>Show / hide the piano</span><span><kbd>Space</kbd></span></div>
+            <div class="row"><span>Octave down / up</span><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd></span></div>
+            <div class="row"><span>Lower row of notes</span><span><kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> &hellip; <kbd>/</kbd></span></div>
+            <div class="row"><span>Upper row of notes</span><span><kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> &hellip; <kbd>P</kbd></span></div>
+            <p class="note">The piano plays with the computer keyboard or the mouse / touch (slide across keys). Each row
+            is one and a half octaves starting at C of the current octave; the keys above each row (<kbd>S</kbd> <kbd>D</kbd>
+            <kbd>G</kbd>&hellip; and <kbd>2</kbd> <kbd>3</kbd> <kbd>5</kbd>&hellip;) are the black keys. The arrows (or the
+            &minus; / + buttons) shift the octave, and the slider sets the velocity. Notes are sent to the MIDI channel of
+            the active chain.</p>
+        </div>
+    </details>
+    <a id="help-link" class="pill" href="https://help.zynthian.org" target="_blank" rel="noopener" title="Zynthian documentation (opens in a new tab)">Help</a>
+    <a id="webconf-link" class="pill" href="/" target="_blank" rel="noopener" title="Open the Zynthian web configuration in a new tab">Webconf</a>
+    <a id="gui-link" class="pill" href="#">Processor GUIs</a>
+    <div id="midi-wrap">
+        <button id="midi-btn" class="pill" title="Use local MIDI controllers">MIDI</button>
+        <div id="midi-menu"></div>
+    </div>
+    </div>
+    </div>
+
+    <div id="piano-panel">
+        <div id="piano-bar">
+            <button id="piano-toggle" title="Show/hide piano keyboard"><i class="fa fa-chevron-up"></i> Piano</button>
+            <span class="piano-ctrl">
+                Keys octave
+                <button id="piano-oct-down">&minus;</button>
+                <span id="piano-oct-label">3</span>
+                <button id="piano-oct-up">+</button>
+            </span>
+            <span class="piano-ctrl">
+                Velocity
+                <input type="range" id="piano-vel" min="1" max="127" value="100">
+            </span>
+            <span class="spacer"></span>
+            <span class="row-break"></span>
+            <span class="piano-ctrl piano-hint">Keys: Z-/ / Q-P &middot; &larr;&rarr; octave &middot; Space: hide</span>
+        </div>
+        <div id="piano-keys" tabindex="-1"></div>
+    </div>
+
+    <script>
+    // The zynthian is the host serving this page (webconf)
+    // The zynthian is the host serving this page (webconf)
+    const targetHost = window.location.hostname;
+    const pageSecure = window.location.protocol === "https:";
+    const pageParams = new URLSearchParams(window.location.search);
+    const wsScheme = pageSecure ? "wss://" : "ws://";
+    const sameOriginWs = (path) => wsScheme + window.location.host + path;
+
+    // Proxy mode (?proxy, virtual.zynthian.org): everything is served from the same origin as this page,
+    // behind a reverse proxy that maps /zynws => websocket, /vnc/ => KasmVNC and /audio/ => audio stream.
+    const proxied = pageParams.has("proxy");
+    // Demo service: the landing page shows this page in a frame ("embed"), so the user's click on
+    // "Start demo" there also allows the audio to play here without any further action.
+    const embedded = proxied && pageParams.has("embed") && window.top !== window.self;
+
+    // Connection settings, from zrLoadConfig():
+    //  - vncViewer "kasm": KasmVNC's own web client in an iframe (containers, virtual.zynthian.org)
+    //  - vncViewer "novnc": noVNC client embedded in this page (real device: x11vnc mirroring the display)
+    //  - audioUrl: audio stream (WHEP) page, null when not available (the audio widget is hidden)
+    // Webconf bridges the websocket, VNC and audio on the page's own origin (see lib/zynremote_handler.py),
+    // so it all works the same over http (ws://) and https (wss://). ?vnc=kasm|novnc overrides the viewer.
+    let vncViewer = null, vncUrl = null, wsUrl = null, audioUrl = null;
+
+    async function zrLoadConfig() {
+        if (proxied) {
+            vncViewer = "kasm";
+            wsUrl = sameOriginWs("/zynws");
+            vncUrl = window.location.origin + "/vnc/?resize=scale&path=vnc/websockify";
+            audioUrl = window.location.origin + "/audio/zynstream/?muted=false";
+            return;
+        }
+        let cfg = null;
+        try {
+            const r = await fetch("/zynremote/config", { cache: "no-store" });
+            if (r.ok) cfg = await r.json();
+        } catch (e) { }
+        if (!cfg) {
+            // Webconf without the bridges: direct connections (http only)
+            console.warn("No /zynremote/config: using direct connections");
+            cfg = { vnc: "novnc", kasm_url: "https://" + targetHost + ":8443/?resize=scale",
+                    legacy: true, audio_path: null };
+        }
+        const forced = pageParams.get("vnc");
+        vncViewer = (forced === "kasm" || forced === "novnc") ? forced : (cfg.vnc || "novnc");
+        if (cfg.legacy) {
+            wsUrl = "ws://" + targetHost + ":8370";
+            vncUrl = vncViewer === "novnc" ? wsScheme + targetHost + ":6080/websockify" : cfg.kasm_url;
+        } else {
+            wsUrl = sameOriginWs(cfg.ws_path);
+            vncUrl = vncViewer === "novnc" ? sameOriginWs(cfg.novnc_path) : cfg.kasm_url;
+        }
+        audioUrl = cfg.audio_path ? window.location.origin + cfg.audio_path : null;
+    }
+
+    // Compact audio controls driving the stream player's <video> (same origin: the page's /audio/ path)
+    function audioControlsInit() {
+        const frame = document.getElementById("audioStreamNode");
+        const wrap = document.querySelector(".audio-wrapper");
+        const muteBtn = document.getElementById("audio-mute");
+        const vol = document.getElementById("audio-vol");
+        const state = document.getElementById("audio-state");
+        let video = null;
+        try { vol.value = localStorage.getItem("zynremote-audio-vol") || 100; } catch (e) {}
+        const icon = () => {
+            const off = !video || video.muted || video.volume === 0;
+            muteBtn.firstElementChild.className = "fa " + (off ? "fa-volume-mute" : "fa-volume-up");
+        };
+        const showState = () => {
+            const msg = video ? (frame.contentDocument.getElementById("message") || {}).innerText : "";
+            const playing = video && !video.paused && !msg;
+            state.className = playing ? "playing" : (msg ? "error" : "");
+            state.title = msg || (playing ? "Audio stream playing" : "Audio stream not available");
+            icon();
+        };
+        frame.addEventListener("load", () => {
+            video = null;
+            try { video = frame.contentDocument && frame.contentDocument.getElementById("video"); } catch (e) {}
+            if (!video) {
+                // Not reachable (another origin): show the player with its own controls
+                wrap.classList.remove("custom");
+                if (frame.src.includes("controls=false")) frame.src = frame.src.replace(/[?&]controls=false/, "");
+                return;
+            }
+            wrap.classList.add("custom");
+            video.volume = vol.value / 100;
+            ["playing", "pause", "waiting", "volumechange", "emptied"].forEach(ev => video.addEventListener(ev, showState));
+            // The stream is always playing: only muted or not. Never leave it paused.
+            video.addEventListener("pause", () => video.play().catch(() => {}));
+            new MutationObserver(showState).observe(frame.contentDocument.getElementById("message") || video,
+                {childList: true, characterData: true, subtree: true});
+            showState();
+        });
+        muteBtn.addEventListener("click", () => {
+            if (!video) return;
+            if (video.paused) { video.muted = false; video.play().catch(() => {}); }   // autoplay was blocked: this click allows it
+            else video.muted = !video.muted;
+            if (!video.muted && video.volume === 0) { vol.value = 50; video.volume = .5; }
+            setTimeout(() => { muteBtn.blur(); keyFocus(); }, 0);
+        });
+        vol.addEventListener("input", () => {
+            if (!video) return;
+            video.volume = vol.value / 100;
+            if (video.volume > 0) video.muted = false;
+            try { localStorage.setItem("zynremote-audio-vol", vol.value); } catch (e) {}
+        });
+        vol.addEventListener("change", () => setTimeout(() => { vol.blur(); keyFocus(); }, 0));
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+        await zrLoadConfig();
+        console.log("VNC viewer:", vncViewer, vncUrl);
+        console.log("Websocket:", wsUrl);
+        console.log("Audio Link:", audioUrl);
+        zynWSConnect();
+        if (vncViewer === "novnc") novncStart();
+        else document.getElementById('vncVisualNode').src = vncUrl;
+        if (!audioUrl) {
+            // Hidden, but keeping its space: the mockup layout must be the same with or without audio
+            document.querySelector('.audio-wrapper').style.visibility = "hidden";
+            return;
+        }
+        audioUrl += (audioUrl.includes("?") ? "&" : "?") + "controls=false";
+        audioControlsInit();
+        document.getElementById('audioStreamNode').src = audioUrl;
+
+        // Browsers block unmuted autoplay until the user interacts with the page. If that was the case,
+        // reload the audio stream once on the first interaction. A click inside the VNC iframe (another
+        // origin) is not seen by this page as an event, but it activates the page: watch the activation state.
+        const hadActivation = navigator.userActivation && navigator.userActivation.hasBeenActive;
+        if (!hadActivation) {
+            let timer = null, done = false;
+            const reloadAudio = () => {
+                if (done) return;
+                done = true;
+                clearInterval(timer);
+                window.removeEventListener("pointerdown", reloadAudio, true);
+                window.removeEventListener("keydown", reloadAudio, true);
+                document.getElementById('audioStreamNode').src = audioUrl;
+            };
+            window.addEventListener("pointerdown", reloadAudio, true);
+            window.addEventListener("keydown", reloadAudio, true);
+            if (navigator.userActivation)
+                timer = setInterval(() => { if (navigator.userActivation.hasBeenActive) reloadAudio(); }, 200);
+        }
+    });
+
+    //-----------------------------------------------------------------------------
+    // noVNC viewer (real device)
+    //-----------------------------------------------------------------------------
+    // The noVNC client (served by webconf at /novnc/, from $ZYNTHIAN_SW_DIR/noVNC) is embedded in this
+    // page, over the screen area of the mockup. It connects through webconf's VNC bridge (/zynremote/vnc)
+    // to x11vnc (vncserver0) mirroring the real display. The display is only scaled.
+    // The keyboard stays with this page (focusOnClick = false): keys go to zynthian by websocket,
+    // like with KasmVNC. Pointer/touch go through VNC.
+
+    const novncBox = document.getElementById("novnc-screen");
+    const novncAuthForm = document.getElementById("novnc-auth");
+    const novncPwInput = document.getElementById("novnc-password");
+    const NOVNC_PW_KEY = "zynremote-vnc-password";   // kept for this browser session only
+    let NovncRFB = null, novncRfb = null, novncRetry = null;
+    let novncPassword = null, novncWasConnected = false, novncAuthFailed = false;
+
+    try { novncPassword = sessionStorage.getItem(NOVNC_PW_KEY); } catch (e) { }
+
+    function novncPlace() {
+        const fo = document.querySelector("#v5_mockup foreignObject");
+        if (!fo) return;
+        const r = fo.getBoundingClientRect();
+        novncBox.style.left = (r.left + window.scrollX) + "px";
+        novncBox.style.top = (r.top + window.scrollY) + "px";
+        novncBox.style.width = r.width + "px";
+        novncBox.style.height = r.height + "px";
+    }
+
+    function novncStatus(html) {
+        const s = document.getElementById("novnc-status");
+        s.innerHTML = html || "";
+        s.hidden = !html;
+    }
+
+    async function novncStart() {
+        novncBox.hidden = false;
+        document.getElementById("vncVisualNode").style.visibility = "hidden";
+        novncPlace();
+        window.addEventListener("resize", novncPlace);
+        window.addEventListener("load", novncPlace);
+        if (window.ResizeObserver)
+            new ResizeObserver(novncPlace).observe(document.getElementById("v5_mockup"));
+        novncStatus("Loading the VNC client…");
+        try {
+            NovncRFB = (await import("/novnc/core/rfb.js")).default;
+        } catch (e) {
+            console.error("noVNC client not available", e);
+            novncStatus("The noVNC client is not available in this zynthian (/novnc/).");
+            return;
+        }
+        novncConnect();
+    }
+
+    function novncConnect() {
+        clearTimeout(novncRetry);
+        novncAuthFailed = false;
+        novncAuthForm.hidden = true;
+        novncStatus(novncWasConnected ? "Display disconnected. Reconnecting…" : "Connecting to the zynthian display…");
+        let rfb;
+        try {
+            rfb = new NovncRFB(novncBox, vncUrl, { shared: true });
+        } catch (e) {
+            console.error("noVNC connection error", e);
+            novncFailed();
+            return;
+        }
+        rfb.scaleViewport = true;     // fit the remote display in the screen area
+        rfb.resizeSession = false;    // the real display can't be resized
+        rfb.focusOnClick = false;     // keep the keyboard in this page
+        rfb.background = "#000";
+        rfb.addEventListener("connect", () => {
+            novncWasConnected = true;
+            novncStatus("");
+            novncAuthForm.hidden = true;
+            if (novncPassword) try { sessionStorage.setItem(NOVNC_PW_KEY, novncPassword); } catch (e) { }
+            keyFocus();
+        });
+        rfb.addEventListener("credentialsrequired", () => {
+            if (novncPassword && !novncAuthFailed) rfb.sendCredentials({ password: novncPassword });
+            else novncAskPassword();
+        });
+        rfb.addEventListener("securityfailure", (e) => {
+            console.warn("VNC security failure:", e.detail);
+            novncAuthFailed = true;
+            novncPassword = null;
+            try { sessionStorage.removeItem(NOVNC_PW_KEY); } catch (err) { }
+        });
+        rfb.addEventListener("disconnect", () => {
+            if (novncRfb !== rfb) return;
+            novncRfb = null;
+            if (novncAuthFailed) novncAskPassword("Wrong password.");
+            else novncFailed();
+        });
+        novncRfb = rfb;
+    }
+
+    function novncFailed() {
+        if (novncWasConnected) {
+            novncStatus("Display disconnected. Reconnecting…");
+            novncRetry = setTimeout(novncConnect, 2000);
+            return;
+        }
+        const msg = "Can't connect to the zynthian display.<br>Enable VNC in webconf (UI Options → Enable VNC) and wait a bit.";
+        novncStatus(msg);
+        novncRetry = setTimeout(novncConnect, 5000);
+    }
+
+    function novncAskPassword(error) {
+        novncStatus("");   // the error, if any, is shown in the form
+        novncAuthForm.querySelector("label").textContent = error ? error + " VNC password" : "VNC password";
+        novncAuthForm.hidden = false;
+        novncPwInput.value = "";
+        novncPwInput.focus();
+    }
+
+    novncAuthForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        novncPassword = novncPwInput.value;
+        novncAuthForm.hidden = true;
+        novncPwInput.blur();
+        if (novncRfb && !novncAuthFailed) novncRfb.sendCredentials({ password: novncPassword });
+        else novncConnect();
+    });
+
+    // Websocket connection with zynthian UI (keys, MIDI, buttons/encoders => UI; LED state <= UI)
+    var zynWS = null;
+    let zynWSRetry = null;
+
+    function zynWSConnect() {
+        clearTimeout(zynWSRetry);
+        try {
+            zynWS = new WebSocket(wsUrl);
+        } catch (error) {
+            console.error("Failed to open websocket connection at " + wsUrl, error);
+            zynWS = null;
+            return;
+        }
+        zynWS.onopen = () => {
+            console.log("Connected to Zynthian UI Websocket");
+            // Feedback streams are sent only when subscribed (the UI replies with the current value)
+            zynWS.send("/subscribe wsled_state");
+        };
+        zynWS.onmessage = (event) => {
+            console.log("Incomming Data => " + event.data)
+            try {
+                const data = JSON.parse(event.data);
+                if (data["wsled_state"]) {
+                    queueLedState(data["wsled_state"])
+                    setLedState(1)
+                }
+            } catch (error) {
+                console.error("Failed to parse incoming packet:", error);
+            }
+        };
+        zynWS.onclose = () => {
+            console.log("Disconnected from Zynthian UI Websocket");
+            setLedStateOff();
+            if (proxied) {
+                if (window.zrCheckSession) window.zrCheckSession();   // demo: did the session end?
+            } else {
+                // The UI may be restarting: reconnect
+                zynWSRetry = setTimeout(zynWSConnect, 3000);
+            }
+        };
+    }
+
+    //-----------------------------------------------------------------------------
+    // Mockup LEDs
+    //-----------------------------------------------------------------------------
+
+    var wscolor_off = "#505050";
+    var wscolor_white = "#F0F0F0";
+    var wscolor_red = "#C00000";
+    var wscolor_green = "#00F000";
+    var wscolor_yellow = "#D0D000";
+    var wscolor_orange = "#F08000";
+    var wscolor_blue = "#0050FF";
+    var wscolor_blue_light = "#00E0E0";
+    var wscolor_purple = "#E000E0";
+    var ledstate_colors = {
+        "0": wscolor_off,
+        "B": wscolor_blue,
+        "G": wscolor_green,
+        "R": wscolor_red,
+        "O": wscolor_orange,
+        "Y": wscolor_yellow,
+        "P": wscolor_purple
+    }
+
+    var v5_led_order = [0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10 , 11, 15, 14, 13, 12, 16, 17, 18, 19]
+    var led_state = null
+
+    function setLedColor(led_id, color) {
+        var elem = document.getElementById(led_id)
+        elem.setAttribute("fill", color)
+    }
+
+    function queueLedState(ls) {
+        led_state = ls
+    }
+
+    function setLedState(fix_order) {
+        if (!led_state) return;
+        var c = 0;
+        var cc = 0;
+        var lsl = led_state.split(",")
+        for (let i = 1; i <= 5; i++) {
+            for (let j = 1; j <= 4; j++) {
+                if (fix_order) cc = v5_led_order[c]
+                else cc = c
+                color = ledstate_colors[lsl[cc]];
+                setLedColor(`led-${i}${j}`, color);
+                c++;
+            }
+        }
+        led_state = null;
+    }
+
+    function setLedStateOff() {
+        for (let i = 1; i <= 5; i++) {
+            for (let j = 1; j <= 4; j++) {
+                setLedColor(`led-${i}${j}`, wscolor_off);
+            }
+        }
+    }
+
+    //-----------------------------------------------------------------------------
+    // Buttons & Encoders Action
+    //-----------------------------------------------------------------------------
+
+    function zynswitchCUIA(zswi, action) {
+        if (zynWS && zynWS.readyState === WebSocket.OPEN) {
+            const payload = {
+                cuia: "zynswitch",
+                args: [zswi, action]
+            };
+            var data = JSON.stringify(payload)
+            console.log(data)
+            zynWS.send(data);
+        }
+    }
+
+    function zynpotCUIA(zpi, delta) {
+        if (zynWS && zynWS.readyState === WebSocket.OPEN) {
+            const payload = {
+                cuia: "zynpot",
+                args: [zpi, delta]
+            };
+            var data = JSON.stringify(payload)
+            console.log(data)
+            zynWS.send(data);
+        }
+    }
+
+    // Variables for push & drag management
+
+    let last_pushed_zswi = -1;
+    let isDragging = false;
+    let isDragged = false;
+    let lastY = 0;
+    let pixelAccumulator = 0;
+    let visualAngle = 0;
+    const PIXELS_PER_TICK = 4;     // Sensitivity: How many pixels of vertical drag equal 1 encoder click/tick
+
+    function startDrag(ev) {
+        isDragging = true;
+        isDragged = false;
+        lastY = ev.clientY;
+        pixelAccumulator = 0;
+        //encoder.setPointerCapture(ev.pointerId);
+    }
+
+    function stopDrag(ev) {
+        if (!isDragging) return;
+        isDragging = false;
+        //encoder.releasePointerCapture(ev.pointerId);
+    }
+
+    function zynswitchAction(target, action, ev) {
+        if (action == "P") {
+            zswi = parseInt(target.getAttribute('data-id'));
+            last_pushed_zswi = zswi;
+            startDrag(ev)
+        }
+        else {
+            zswi = last_pushed_zswi
+            last_pushed_zswi = -1
+            stopDrag(ev)
+        }
+
+        if (zswi < 0) {
+            return;
+        }
+        // Visual Feedback
+        else if (zswi >= 20) {
+            var knob_id = zswi - 19
+            if (action == "P") setKnobPush(knob_id, true);
+            else setKnobPush(knob_id, false);
+        }
+        else if (zswi < 20) {
+            var but_id = `${1 + Math.floor(zswi / 4)}${1 + zswi % 4}`
+            if (action == "P") setButtonPush(but_id, true)
+            else setButtonPush(but_id, false)
+        }
+
+        // CUIA
+        if (!isDragged) {
+            zynswitchCUIA(zswi + 4, action)
+        }
+    }
+
+    function zynpotDrag(target, ev) {
+        if (!isDragging || last_pushed_zswi < 20) return;
+
+        // Dragging UP increases value (positive delta), dragging DOWN decreases it
+        const deltaY = lastY - ev.clientY;
+        lastY = ev.clientY;
+        pixelAccumulator += deltaY;
+
+        // Check if movement crossed one or more tick thresholds
+        while (Math.abs(pixelAccumulator) >= PIXELS_PER_TICK) {
+            const step = pixelAccumulator > 0 ? 1 : -1;
+            pixelAccumulator -= step * PIXELS_PER_TICK;
+
+            visualAngle = (visualAngle + step * 15) % 360;
+            //dial.setAttribute('transform', `rotate(${visualAngle} 50 50)`);
+
+            let zpi = last_pushed_zswi - 20
+            zynpotCUIA(zpi, step);
+            setKnobRotation(zpi + 1, step);
+            if (!isDragged) {
+                isDragged = true;
+                // Cancel push action
+                setKnobPush(zpi + 1, false);
+                zynswitchCUIA(last_pushed_zswi + 4, "X")
+            }
+        }
+    }
+
+    function zynpotWheel(target, delta) {
+        const step = delta > 0 ? -1 : 1;
+
+        visualAngle = (visualAngle + step * 15) % 360;
+        //dial.setAttribute('transform', `rotate(${visualAngle} 50 50)`);
+
+        let zpi = parseInt(target.getAttribute('data-id')) - 20;
+        zynpotCUIA(zpi, step);
+        setKnobRotation(zpi + 1, step);
+    }
+
+    function zynswitchConfigure(butid) {
+        var butObj = document.getElementById(butid)
+
+        // Pointer Listeners
+        butObj.addEventListener('pointerdown', (e) => zynswitchAction(e.target, "P", e));
+    }
+
+    function zynpotConfigure(zpid) {
+        var knobObj = document.getElementById(zpid)
+
+        // Pointer Listeners
+        knobObj.addEventListener('pointerdown', (e) => zynswitchAction(e.target, "P", e));
+
+        // Wheel Listener
+        knobObj.addEventListener("wheel", function(ev) {
+            ev.preventDefault(); // Stops the page from scrolling
+            zynpotWheel(ev.target, ev.deltaY)
+        }, { passive: false });
+    }
+
+    // Configure silicone buttons
+    for (let i = 1; i <= 5; i++) {
+        for (let j = 1; j <= 4; j++) {
+            zynswitchConfigure(`but-${i}${j}`);
+        }
+    }
+
+    // Configure knob rotary & switches
+    for (let i = 1; i <= 4; i++) {
+        zynpotConfigure(`knob-${i}`);
+    }
+
+    // Configure Drag & Release Actions
+    window.addEventListener('pointermove', (e) => zynpotDrag(e.target, e));
+    window.addEventListener('pointerup', (e) => zynswitchAction(e.target, "R", e));
+    window.addEventListener('pointercancel', (e) => zynswitchAction(e.target, "R", e));
+
+    //-----------------------------------------------------------------------------
+    // Mockup buttons & rotary graphics
+    //-----------------------------------------------------------------------------
+
+    var autoFadeTimeOuts = {}
+
+    function fadeElem(eid, state) {
+        var elem = document.querySelector("svg#v5_mockup #" + eid)
+        if (elem) {
+            if (state) {
+                elem.style.opacity = "1";
+                elem.classList.remove("fadeOutElem")
+                elem.classList.add("fadeInElem")
+            }
+            else {
+                elem.style.opacity = "0";
+                elem.classList.remove("fadeInElem")
+                elem.classList.add("fadeOutElem")
+            }
+        }
+    }
+
+    function autoFadeElemOutCB(eid) {
+        fadeElem(eid, false)
+        autoFadeTimeOuts[eid] = null
+    }
+
+    function autoFadeElem(eid) {
+        if (autoFadeTimeOuts[eid]) clearTimeout(autoFadeTimeOuts[eid])
+        fadeElem(eid, true)
+        autoFadeTimeOuts[eid] = setTimeout(autoFadeElemOutCB, 100, eid)
+    }
+
+    function setButtonPush(bid, state) {
+        console.log(`BUTTON PUSH ${bid}: ${state}`);
+        fadeElem("but-" + bid, state)
+        fadeElem("bout-" + bid, state)
+    }
+
+    function setKnobPush(kid, state) {
+        console.log(`KNOB PUSH ${kid}: ${state}`);
+        fadeElem("knout-" + kid, state)
+    }
+
+    function setKnobRotation(kid, dval) {
+        console.log(`KNOB ROTATION ${kid}: ${dval}`);
+        if (dval > 0) autoFadeElem("rknob-" + kid)
+        else if (dval < 0) autoFadeElem("lknob-" + kid)
+    }
+
+    //-----------------------------------------------------------------------------
+    // Piano keyboard
+    //-----------------------------------------------------------------------------
+
+    const PIANO_FULL_WIDTH = 1280;    // Window width (px) from which the full grand piano range is shown
+    const PIANO_FULL_RANGE = [21, 108]; // A0 - C8
+    const PIANO_MIN_KEY_PX = 28;      // Minimum white key width (px) on narrower windows
+    let pianoBaseOctave = 3;          // Octave of the computer keyboard rows. Also first visible C on narrow windows
+    const pianoDown = {};             // pointer/key id => note currently held
+
+    const piano_panel = document.getElementById("piano-panel");
+    const piano_keys = document.getElementById("piano-keys");
+
+    // Computer keyboard => semitone offset from the first visible C (two rows, 1.5 octaves each)
+    const piano_keymap = {};
+    "zsxdcvgbhnjm,l.;/".split("").forEach((k, i) => piano_keymap[k] = i);
+    "q2w3er5t6y7ui9o0p".split("").forEach((k, i) => piano_keymap[k] = 12 + i);
+
+    function pianoSend(type, note, vel) {
+        if (zynWS && zynWS.readyState === WebSocket.OPEN) {
+            zynWS.send(JSON.stringify({
+                midi: type,
+                note: note,
+                vel: vel
+            }));
+        }
+    }
+
+    // Take keyboard focus away from the VNC iframe so computer keys reach the piano
+    function pianoFocus() {
+        window.focus();
+        piano_keys.focus({ preventScroll: true });
+    }
+
+    function pianoFirstNote() {
+        return 12 * (pianoBaseOctave + 1);
+    }
+
+    function pianoKeyElem(note) {
+        return piano_keys.querySelector(`[data-note="${note}"]`);
+    }
+
+    function pianoNoteOn(id, note) {
+        if (note < 0 || note > 127 || pianoDown[id] !== undefined) return;
+        pianoDown[id] = note;
+        const el = pianoKeyElem(note);
+        if (el) el.classList.add("active");
+        pianoSend("note_on", note, parseInt(document.getElementById("piano-vel").value));
+    }
+
+    function pianoNoteOff(id) {
+        const note = pianoDown[id];
+        if (note === undefined) return;
+        delete pianoDown[id];
+        // Keep highlighted if another source still holds the same note
+        if (!Object.values(pianoDown).includes(note)) {
+            const el = pianoKeyElem(note);
+            if (el) el.classList.remove("active");
+        }
+        pianoSend("note_off", note, 0);
+    }
+
+    function pianoAllOff() {
+        Object.keys(pianoDown).forEach(pianoNoteOff);
+    }
+
+    const piano_white = [0, 2, 4, 5, 7, 9, 11];
+    function pianoIsWhite(n) { return piano_white.includes(n % 12); }
+
+    // Visible note range [first, last] for the current window width
+    function pianoRange() {
+        if (window.innerWidth >= PIANO_FULL_WIDTH) return PIANO_FULL_RANGE;
+        const nwhite = Math.max(8, Math.floor(window.innerWidth / PIANO_MIN_KEY_PX));
+        // Start at a C, follow the keyboard octave, and keep the range inside 0-127
+        let first = pianoFirstNote();
+        let last = first, count = pianoIsWhite(first) ? 1 : 0;
+        while (count < nwhite && last < 127) {
+            last++;
+            if (pianoIsWhite(last)) count++;
+        }
+        while (!pianoIsWhite(last)) last--;
+        return [first, last];
+    }
+
+    function pianoBuild() {
+        pianoAllOff();
+        piano_keys.innerHTML = "";
+        const [first, last] = pianoRange();
+        const whites = [];
+        for (let n = first; n <= last; n++) if (pianoIsWhite(n)) whites.push(n);
+        const wpct = 100 / whites.length;
+        whites.forEach((n) => {
+            const el = document.createElement("div");
+            el.className = "pkey-white";
+            el.dataset.note = n;
+            if (n % 12 === 0) el.innerHTML = `<span>C${Math.floor(n / 12) - 1}</span>`;
+            piano_keys.appendChild(el);
+        });
+        whites.forEach((n, wi) => {
+            if (n + 1 <= last && !pianoIsWhite(n + 1)) {
+                const el = document.createElement("div");
+                el.className = "pkey-black";
+                el.dataset.note = n + 1;
+                el.style.width = (wpct * 0.6) + "%";
+                el.style.left = (wpct * (wi + 1) - wpct * 0.3) + "%";
+                piano_keys.appendChild(el);
+            }
+        });
+        document.getElementById("piano-oct-label").textContent = pianoBaseOctave;
+    }
+
+    // Rebuild when the window size changes the visible range
+    let pianoResizeTimer = null;
+    window.addEventListener("resize", () => {
+        clearTimeout(pianoResizeTimer);
+        pianoResizeTimer = setTimeout(() => {
+            if (piano_panel.classList.contains("open")) pianoBuild();
+        }, 150);
+    });
+
+    function pianoSetOctave(o) {
+        o = Math.max(0, Math.min(6, o));
+        if (o === pianoBaseOctave) return;
+        pianoBaseOctave = o;
+        pianoBuild();
+    }
+
+    function pianoNoteAt(x, y) {
+        const el = document.elementFromPoint(x, y);
+        if (el && el.dataset && el.dataset.note !== undefined && piano_keys.contains(el))
+            return parseInt(el.dataset.note);
+        return undefined;
+    }
+
+    // Mouse / touch (with glissando while dragging)
+    piano_keys.addEventListener("pointerdown", (e) => {
+        e.preventDefault();      // Avoid text selection, so focus is set explicitly
+        pianoFocus();
+        piano_keys.setPointerCapture(e.pointerId);
+        const n = pianoNoteAt(e.clientX, e.clientY);
+        if (n !== undefined) pianoNoteOn("p" + e.pointerId, n);
+    });
+    piano_keys.addEventListener("pointermove", (e) => {
+        const id = "p" + e.pointerId;
+        if (pianoDown[id] === undefined) return;
+        const n = pianoNoteAt(e.clientX, e.clientY);
+        if (n !== undefined && n !== pianoDown[id]) {
+            pianoNoteOff(id);
+            pianoNoteOn(id, n);
+        }
+    });
+    ["pointerup", "pointercancel"].forEach(t =>
+        piano_keys.addEventListener(t, (e) => pianoNoteOff("p" + e.pointerId)));
+
+    // Computer keyboard
+    // While the piano is open it keeps the keyboard focus. CTRL+key combinations are forwarded to
+    // zynthian over the websocket as the plain key, without CTRL (Esc and Enter always); injected into its X display.
+    const keysForwarded = new Set();      // e.code of forwarded keys currently held
+    const keysBrowser = /^F(5|11|12)$/;   // Let the browser handle these
+
+    function sendKey(action, code) {
+        if (zynWS && zynWS.readyState === WebSocket.OPEN)
+            zynWS.send(JSON.stringify({ key: action, code: code }));
+    }
+
+    function releaseForwardedKeys() {
+        keysForwarded.forEach(c => sendKey("up", c));
+        keysForwarded.clear();
+    }
+
+    function pianoOpen() {
+        return piano_panel.classList.contains("open");
+    }
+
+    // Text fields of this page (e.g. the VNC password) get their keys normally
+    const isTextField = (el) => el && el.matches && el.matches("input[type=password], input[type=text]");
+
+    function onKeyDown(e) {
+        if (isTextField(e.target)) return;
+        // Space bar toggles the piano
+        if (e.code === "Space" && !(e.ctrlKey || e.metaKey || e.altKey)) {
+            e.preventDefault();
+            if (!e.repeat) pianoToggle();
+            return;
+        }
+        const isRange = e.target && e.target.type === "range";
+        // Piano keys (only while the piano is open)
+        if (pianoOpen() && !(e.ctrlKey || e.metaKey || e.altKey)) {
+            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                e.preventDefault();
+                pianoSetOctave(pianoBaseOctave + (e.key === "ArrowRight" ? 1 : -1));
+                return;
+            }
+            const off = piano_keymap[e.key.toLowerCase()];
+            if (off !== undefined) {
+                e.preventDefault();
+                if (!e.repeat) pianoNoteOn("k" + e.code, pianoFirstNote() + off);
+                return;
+            }
+        }
+        // Esc and Enter always go to zynthian (with or without CTRL). Other keys only with CTRL, sent as
+        // the plain key (without CTRL). Everything else is ignored.
+        const alwaysSent = /^(Escape|Enter|NumpadEnter)$/.test(e.code);
+        if (!alwaysSent && !e.ctrlKey) return;
+        if (e.altKey || e.metaKey) return;
+        if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(e.code)) return;   // modifiers alone
+        if (isRange && e.key.startsWith("Arrow")) return;   // let the velocity slider work
+        if (!e.repeat || !keysForwarded.has(e.code)) {
+            // Auto-repeat is generated again by X: send the press only once
+            keysForwarded.add(e.code);
+            sendKey("down", e.code);
+        }
+        if (!keysBrowser.test(e.code)) e.preventDefault();
+    }
+
+    function onKeyUp(e) {
+        if (isTextField(e.target) && !keysForwarded.has(e.code)) return;
+        if (e.code === "Space") { e.preventDefault(); return; }
+        if (pianoNoteOffKey(e)) return;
+        if (keysForwarded.delete(e.code)) sendKey("up", e.code);
+    }
+
+    function pianoNoteOffKey(e) {
+        const id = "k" + e.code;
+        if (pianoDown[id] === undefined) return false;
+        pianoNoteOff(id);
+        return true;
+    }
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", () => { pianoAllOff(); releaseForwardedKeys(); });
+
+    // Keep the keyboard focus in this page, never in the VNC iframe (e.g. after clicking it), so
+    // the forwarded keys are always captured. With the piano open the focus sits on the piano.
+    document.body.tabIndex = -1;
+    document.body.style.outline = "none";
+    function keyFocus() {
+        if (pianoOpen()) { pianoFocus(); return; }
+        window.focus();
+        document.body.focus({ preventScroll: true });
+    }
+    window.addEventListener("blur", () => {
+        // Focus moved into the cross-origin iframe: take it back
+        setTimeout(() => {
+            if (document.activeElement && document.activeElement.tagName === "IFRAME")
+                keyFocus();
+        }, 0);
+    });
+    document.addEventListener("focusout", () => {
+        setTimeout(() => {
+            if (pianoOpen() && (!document.activeElement || document.activeElement === document.body))
+                pianoFocus();
+        }, 0);
+    });
+
+    // Initially the keyboard focus must be in this page, not in the VNC iframe, so
+    // the space bar (and the piano keys) work from the start. KasmVNC grabs the focus when
+    // it loads, so retry a few times until the user interacts.
+    let focusUserInteracted = false;
+    ["pointerdown", "keydown"].forEach(t =>
+        window.addEventListener(t, () => { focusUserInteracted = true; }, true));
+
+    function focusPage() {
+        if (focusUserInteracted) return;
+        if (document.activeElement && document.activeElement.tagName === "IFRAME")
+            document.activeElement.blur();
+        window.focus();
+        if (document.body) document.body.focus({ preventScroll: true });
+    }
+
+    document.getElementById("vncVisualNode").addEventListener("load", () => {
+        [0, 300, 1000, 2500, 5000].forEach(ms => setTimeout(focusPage, ms));
+    });
+    window.addEventListener("DOMContentLoaded", focusPage);
+    window.addEventListener("load", focusPage);
+
+    // Expand / collapse
+    function pianoToggle() {
+        const open = piano_panel.classList.toggle("open");
+        document.body.classList.toggle("piano-open", open);
+        if (open) pianoBuild();
+        document.querySelector("#piano-toggle i").className = open ? "fa fa-chevron-down" : "fa fa-chevron-up";
+        if (!open) pianoAllOff();
+        if (open) pianoFocus();
+        else { document.getElementById("piano-toggle").blur(); keyFocus(); }
+    }
+    document.getElementById("piano-toggle").addEventListener("click", pianoToggle);
+    // Real height of the piano bar (it wraps on small screens): the mockup is sized above it
+    new ResizeObserver(() => document.documentElement.style.setProperty("--piano-bar-h",
+        document.getElementById("piano-bar").offsetHeight + "px")).observe(document.getElementById("piano-bar"));
+    document.getElementById("piano-oct-down").addEventListener("click", () => pianoSetOctave(pianoBaseOctave - 1));
+    document.getElementById("piano-oct-up").addEventListener("click", () => pianoSetOctave(pianoBaseOctave + 1));
+
+    pianoBuild();
+
+    // Keyboard tips box (collapsed by default, remembers its state)
+    const legend = document.getElementById("keys-legend");
+    try { legend.open = localStorage.getItem("zynremote-legend") === "1"; } catch (e) {}
+    legend.addEventListener("toggle", () => {
+        if (legend.open) midiMenu.classList.remove("open");
+        try { localStorage.setItem("zynremote-legend", legend.open ? "1" : "0"); } catch (e) {}
+    });
+    legend.querySelector("summary").addEventListener("click", () => {
+        // Do not keep the focus on the box: keys must keep going to the page
+        setTimeout(() => { document.activeElement && document.activeElement.blur(); keyFocus(); }, 0);
+    });
+
+    // Collapsed top menu (small screens)
+    const topbar = document.getElementById("topbar");
+    const topbarToggle = document.getElementById("topbar-toggle");
+    topbarToggle.addEventListener("click", () => {
+        const open = topbar.classList.toggle("open");
+        topbarToggle.setAttribute("aria-expanded", open);
+        setTimeout(() => { document.activeElement && document.activeElement.blur(); keyFocus(); }, 0);
+    });
+    document.addEventListener("pointerdown", (e) => {
+        if (!topbar.contains(e.target)) topbar.classList.remove("open");
+    });
+    topbar.querySelectorAll("#topbar-items a").forEach(a => a.addEventListener("click", () => topbar.classList.remove("open")));
+
+    // Processor GUIs (display :1). Always active: if the VNC service is not running, the entry starts it
+    // (CUIA vnc_start) and opens the GUIs when they are ready. The window is opened at once, on the click
+    // (browsers block windows opened later), with a "starting" message until the GUIs answer.
+    const guiLink = document.getElementById("gui-link");
+    guiLink.classList.remove("disabled");
+    guiLink.title = "Open the processor GUIs (native plugin windows) in a new tab";
+    async function guiUrl() {
+        try {
+            if (proxied) {
+                const r = await fetch("/vnc1/", { cache: "no-store" });     // (KasmVNC answers 404 to HEAD)
+                return r.ok ? window.location.origin + "/vnc1/?resize=remote&path=vnc1/websockify" : null;
+            }
+            const r = await fetch("/zynremote/config", { cache: "no-store" });
+            return r.ok ? ((await r.json()).gui_url || null) : null;
+        } catch (e) { return null; }
+    }
+    let guiStarting = false;
+    guiLink.addEventListener("click", async (e) => {
+        e.preventDefault();
+        if (guiStarting) return;
+        const win = window.open("", "_blank");
+        if (!win) return;
+        win.document.title = "Processor GUIs";
+        win.document.body.style.cssText = "margin:0;height:100vh;display:grid;place-items:center;background:#202020;" +
+            "color:#cfd6e2;font:16px system-ui,sans-serif";
+        win.document.body.textContent = "Starting the processor GUIs\u2026";
+        let url = await guiUrl();
+        if (!url) {
+            guiStarting = true;
+            if (zynWS && zynWS.readyState === WebSocket.OPEN)
+                zynWS.send(JSON.stringify({ cuia: "vnc_start", args: [] }));
+            for (let i = 0; i < 40 && !url && !win.closed; i++) {      // up to ~30 s
+                await new Promise(r => setTimeout(r, 750));
+                url = await guiUrl();
+            }
+            // The VNC server answers before its desktop (window manager, panel) is up: give it a moment
+            if (url) await new Promise(r => setTimeout(r, 2000));
+            guiStarting = false;
+        }
+        if (win.closed) return;
+        if (url) { win.opener = null; win.location.href = url; }
+        else win.document.body.textContent = "The processor GUIs could not be started. Try again, or enable VNC in the zynthian UI (Admin menu).";
+        setTimeout(keyFocus, 0);
+    });
+
+    // Local MIDI controllers (Web MIDI): their events are sent over the websocket like the virtual piano's.
+    // The server ignores the MIDI channel and uses the active chain's channel.
+    const midiBtn = document.getElementById("midi-btn");
+    const midiMenu = document.getElementById("midi-menu");
+    let midiAccess = null;
+    const midiHeld = {};                // port id => Set of held notes (released if the port goes away)
+    const midiPending = new Map();      // "cc:7" / "bend" / "press" => value, coalesced before sending
+    let midiFlushTimer = null;
+    const midiOffPorts = new Set();     // ports the user disabled
+    try { JSON.parse(localStorage.getItem("zynremote-midi-off") || "[]").forEach(i => midiOffPorts.add(i)); } catch (e) {}
+
+    function midiSend(obj) {
+        if (zynWS && zynWS.readyState === WebSocket.OPEN) zynWS.send(JSON.stringify(obj));
+        if (window.zrPing) window.zrPing();
+    }
+
+    function midiFlush() {
+        midiFlushTimer = null;
+        midiPending.forEach((val, key) => {
+            if (key.startsWith("cc:")) midiSend({ midi: "cc", ctrl: parseInt(key.slice(3)), val: val });
+            else if (key === "bend") midiSend({ midi: "pitch_bend", val: val });
+            else if (key === "press") midiSend({ midi: "chan_pressure", val: val });
+        });
+        midiPending.clear();
+    }
+
+    function midiQueue(key, val) {
+        midiPending.set(key, val);
+        if (!midiFlushTimer) midiFlushTimer = setTimeout(midiFlush, 10);
+    }
+
+    function midiNoteShow(note, on) {
+        const el = pianoKeyElem(note);
+        if (el) el.classList.toggle("active", on);
+    }
+
+    function midiNote(portId, note, vel) {
+        const held = midiHeld[portId] || (midiHeld[portId] = new Set());
+        if (vel > 0) { held.add(note); midiSend({ midi: "note_on", note: note, vel: vel }); }
+        else { held.delete(note); midiSend({ midi: "note_off", note: note, vel: 0 }); }
+        midiNoteShow(note, vel > 0);
+    }
+
+    function midiReleasePort(portId) {
+        (midiHeld[portId] || []).forEach(n => { midiSend({ midi: "note_off", note: n, vel: 0 }); midiNoteShow(n, false); });
+        delete midiHeld[portId];
+    }
+
+    function midiFlash() {
+        midiBtn.classList.add("flash");
+        setTimeout(() => midiBtn.classList.remove("flash"), 80);
+    }
+
+    function midiOnMessage(e) {
+        const d = e.data, st = d[0] & 0xF0, id = e.target.id;
+        if (d.length < 2) return;
+        midiFlash();
+        if (st === 0x90) midiNote(id, d[1], d[2]);                           // note on (vel 0 = note off)
+        else if (st === 0x80) midiNote(id, d[1], 0);                         // note off
+        else if (st === 0xB0) midiQueue("cc:" + d[1], d[2]);                 // control change
+        else if (st === 0xE0) midiQueue("bend", d[1] | (d[2] << 7));         // pitch bend
+        else if (st === 0xD0) midiQueue("press", d[1]);                      // channel pressure
+        else if (st === 0xC0) midiSend({ midi: "program", val: d[1] });      // program change
+        // Everything else (poly aftertouch, clock, sysex...) is ignored
+    }
+
+    function midiInputs() {
+        return midiAccess ? Array.from(midiAccess.inputs.values()) : [];
+    }
+
+    function midiAttach() {
+        midiInputs().forEach(inp => {
+            const enabled = inp.state === "connected" && !midiOffPorts.has(inp.id);
+            if (enabled) inp.onmidimessage = midiOnMessage;
+            else { inp.onmidimessage = null; midiReleasePort(inp.id); }
+        });
+        const active = midiInputs().filter(i => i.state === "connected" && !midiOffPorts.has(i.id)).length;
+        midiBtn.textContent = midiAccess ? "MIDI (" + active + ")" : "MIDI";
+        midiBtn.classList.toggle("on", !!midiAccess);
+        midiMenuBuild();
+    }
+
+    function midiMenuBuild() {
+        midiMenu.innerHTML = "";
+        if (!midiAccess) return;
+        const ports = midiInputs().filter(i => i.state === "connected");
+        if (!ports.length) {
+            midiMenu.innerHTML = '<div class="muted">No MIDI input devices found.<br>Connect a controller.</div>';
+        }
+        ports.forEach(inp => {
+            const label = document.createElement("label");
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = !midiOffPorts.has(inp.id);
+            cb.addEventListener("change", () => {
+                if (cb.checked) midiOffPorts.delete(inp.id); else midiOffPorts.add(inp.id);
+                try { localStorage.setItem("zynremote-midi-off", JSON.stringify([...midiOffPorts])); } catch (e) {}
+                midiAttach();
+            });
+            label.append(cb, document.createTextNode(inp.name || inp.id));
+            midiMenu.appendChild(label);
+        });
+        const off = document.createElement("div");
+        off.className = "muted";
+        off.style.marginTop = "6px";
+        off.innerHTML = '<a href="#" id="midi-off" style="color:#ff9d80">Turn MIDI off</a>';
+        midiMenu.appendChild(off);
+        off.querySelector("a").addEventListener("click", (e) => { e.preventDefault(); midiDisable(); });
+    }
+
+    function midiDisable() {
+        midiInputs().forEach(inp => { inp.onmidimessage = null; midiReleasePort(inp.id); });
+        if (midiAccess) midiAccess.onstatechange = null;
+        midiAccess = null;
+        midiMenu.classList.remove("open");
+        midiAttach();
+        try { localStorage.setItem("zynremote-midi", "0"); } catch (e) {}
+    }
+
+    function midiEnable() {
+        return navigator.requestMIDIAccess().then(acc => {
+            midiAccess = acc;
+            acc.onstatechange = midiAttach;
+            midiAttach();
+            try { localStorage.setItem("zynremote-midi", "1"); } catch (e) {}
+        }).catch(() => {
+            midiBtn.title = "MIDI access was denied or is not available";
+        });
+    }
+
+    if (!navigator.requestMIDIAccess || !window.isSecureContext) {
+        midiBtn.disabled = true;
+        midiBtn.title = navigator.requestMIDIAccess ? "Web MIDI needs a secure (HTTPS) page" : "This browser has no Web MIDI support";
+    } else {
+        midiBtn.addEventListener("click", () => {
+            legend.open = false;     // the two drop-downs share the same corner
+            if (!midiAccess) midiEnable().then(() => { if (midiAccess) midiMenu.classList.add("open"); });
+            else midiMenu.classList.toggle("open");
+        });
+        // Close the menu when clicking elsewhere
+        document.addEventListener("pointerdown", (e) => {
+            if (!midiMenu.contains(e.target) && e.target !== midiBtn) midiMenu.classList.remove("open");
+        });
+        let wasOn = false;
+        try { wasOn = localStorage.getItem("zynremote-midi") === "1"; } catch (e) {}
+        // Demo service: MIDI controllers work right away (the browser asks for permission once)
+        if (wasOn || proxied) midiEnable();
+    }
+
+    // Demo service (proxy mode only): remaining time badge, activity ping, end session.
+    if (proxied) {
+        const badge = document.createElement("span");
+        badge.className = "demo-badge";
+        badge.style.cssText = "display:flex;gap:14px;align-items:center;font-size:13px;color:#e8eaee;white-space:nowrap";
+        badge.innerHTML = '<button id="demo-end" title="End this demo session">End session</button>';
+        document.getElementById("piano-bar").appendChild(badge);   // the bar is always visible
+        const homeUrl = "https://" + window.location.hostname + "/";
+        let remaining = null, lastPing = 0;
+        const fmt = (t) => Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+        // Session over (time limit, idle, ended): go back to the landing page, which says why.
+        // "peek" leaves the reason for the landing page to show. Re-checked quickly, because KasmVNC
+        // shows its own "disconnected" dialog inside its iframe as soon as the container goes away.
+        const refresh = window.zrCheckSession = () => fetch("/zr/api/status?peek=1", {cache: "no-store"}).then(r => {
+            if (r.status === 401) return {state: "gone"};
+            return r.json();
+        }).then(st => {
+            if (st.state !== "ready") breakOut(homeUrl);
+            else remaining = st.remaining;
+        }).catch(() => {});
+        function breakOut(url) {
+            // Embedded: the landing page (parent) shows why the session ended
+            if (embedded) { window.parent.postMessage({zr: "ended"}, homeUrl.replace(/\/$/, "")); return; }
+            try { window.top.location.href = url; } catch (e) { window.location.href = url; }
+        }
+        if (window.top !== window.self && !embedded) breakOut(window.location.href);   // never run nested inside another page
+        setInterval(refresh, 5000);
+        refresh();
+        const ping = window.zrPing = () => {
+            const now = Date.now();
+            if (now - lastPing < 20000) return;
+            lastPing = now;
+            fetch("/zr/api/activity", {method: "POST"}).catch(() => {});
+        };
+        ["keydown", "mousedown", "touchstart", "pointerdown"].forEach(ev => window.addEventListener(ev, ping, true));
+        document.getElementById("demo-end").addEventListener("click", (e) => {
+            e.preventDefault();
+            if (confirm("End this demo session?"))
+                fetch("/zr/api/leave", {method: "POST"}).finally(() => breakOut(homeUrl));
+        });
+    }
+
+    </script>
+
+</body>
+</html>
