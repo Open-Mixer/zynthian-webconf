@@ -27,7 +27,7 @@ import logging
 import tornado.web
 import pyliblo3 as liblo
 from time import sleep
-from subprocess import check_output
+from subprocess import check_output, run
 
 import zynconf
 # Avoid unwanted debug messages from zynconf module
@@ -114,7 +114,9 @@ class ZynthianBasicHandler(tornado.web.RequestHandler):
 
         # If VNC Server is enabled, add access URI to info
         if self.is_service_active("novnc0"):
-            info['novnc0_uri'] = f"{self.request.protocol}://{self.request.host}:6080/vnc.html"
+            # Zynthian remote page (V5 mockup + noVNC viewer + piano/keys/MIDI over websocket).
+            # Its connections are bridged by webconf (lib/zynremote_handler.py): works on http & https.
+            info['novnc0_uri'] = f"{self.request.protocol}://{self.request.host}/mockup/zynremote.html"
         if self.is_service_active("novnc1"):
             info['novnc1_uri'] = f"{self.request.protocol}://{self.request.host}:6081/vnc.html"
 
@@ -175,9 +177,19 @@ class ZynthianBasicHandler(tornado.web.RequestHandler):
         except Exception as e:
             logging.error("Reboot: {}".format(e))
 
+    @staticmethod
+    def get_ui_service():
+        """The enabled UI service: zynthian.service on real devices; virtual_zynthian.service in containers
+        (virtual zynthian, where zynthian.service is disabled). Fallback: zynthian.
+        Same logic as restart_zynthian_ui() in zynthian-sys/scripts/delayed_action_flags.sh"""
+        for svc in ("zynthian", "virtual_zynthian"):
+            if run(["systemctl", "-q", "is-enabled", svc], capture_output=True).returncode == 0:
+                return svc
+        return "zynthian"
+
     def restart_ui(self):
         try:
-            check_output("systemctl restart zynthian", shell=True)
+            check_output(f"systemctl restart {self.get_ui_service()}", shell=True)
             self.restart_ui_flag = False
             if os.path.isfile(self.restart_ui_flag_fpath):
                 os.remove(self.restart_ui_flag_fpath)
